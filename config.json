@@ -1,0 +1,5 @@
+{
+  "top": 100,
+  "regex": "[^a-zA-ZąęśżźćńłóĄĘŚŻŹĆŃŁÓ]+",
+  "minimum_word_length": 0
+}

@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -12,6 +14,12 @@ import (
 	"github.com/ledongthuc/pdf"
 	"github.com/sqweek/dialog"
 )
+
+type Config struct {
+	Top               int    `json:"top"`
+	MinimumWordLength int    `json:"minimum_word_length"`
+	Regex             string `json:"regex"`
+}
 
 type Pair struct {
 	Key   string
@@ -24,43 +32,63 @@ func (p PairList) Len() int           { return len(p) }
 func (p PairList) Less(i, j int) bool { return p[i].Value > p[j].Value }
 func (p PairList) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }
 
+var cfg = &Config{}
+
 func main() {
-	reg, err := regexp.Compile("[^a-zA-ZąęśżźćńłóĄĘŚŻŹĆŃŁÓ]+")
+	log.Print("Loading config...")
+	configFile, err := os.Open("config.json")
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println("Loading file...")
+	defer configFile.Close()
+	log.Print("Parsing config...")
+	byteValue, err := ioutil.ReadAll(configFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = json.Unmarshal(byteValue, cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+	reg, err := regexp.Compile(cfg.Regex)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Print("Loading file...")
 	filename, err := dialog.File().Filter("PDF file", "pdf").Load()
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println("Reading file...")
-	output, err := readPdf(filename)
+	log.Print("Reading file...")
+	fileContent, err := readPdf(filename)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println("Processing file content...")
+	log.Print("Processing file content...")
 	wordFrequencies := make(map[string]int)
-	output = strings.Trim(output, "")
-	for _, word := range strings.Split(output, " ") {
-		processedString := strings.ToLower(reg.ReplaceAllString(word, ""))
-		if strings.Trim(processedString, "") == "" {
-			continue
+	fileContent = strings.Trim(fileContent, "")
+	total := 0
+	for _, word := range strings.Split(fileContent, " ") {
+		processedString := strings.Trim(strings.ToLower(reg.ReplaceAllString(word, "")), "")
+		if processedString != "" && ((cfg.MinimumWordLength > 0 && len(processedString) >= cfg.MinimumWordLength) || cfg.MinimumWordLength <= 0) {
+			wordFrequencies[processedString]++
+			total++
 		}
-		wordFrequencies[processedString]++
 	}
-	response := ""
+	log.Print("Preparing output...")
+	output := ""
 	for i, pair := range rankByWordCount(wordFrequencies) {
-		if i >= 99 {
+		if i > cfg.Top-1 {
 			break
 		}
-		response += fmt.Sprintf("%s:%d", pair.Key, pair.Value)
-		if i != 98 {
-			response += "\n"
+		output += fmt.Sprintf("%s;%d;%f", pair.Key, pair.Value, float64(pair.Value)/float64(total))
+		if i != cfg.Top-1 {
+			output += "\n"
 		}
 	}
+	log.Print("Saving output...")
 	filename, err = dialog.File().Filter("txt file", "txt").Title("Export").Save()
-	err = ioutil.WriteFile(filename, []byte(response), 0644)
+	err = ioutil.WriteFile(filename, []byte(output), 0644)
 	if err != nil {
 		log.Fatal(err)
 	}
